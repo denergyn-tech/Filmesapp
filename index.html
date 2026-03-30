@@ -1182,6 +1182,15 @@
     .stat b{font-size:16px}
   }
 
+  .posterEditBtn{
+    position:absolute; top:8px; right:8px; z-index:6;
+    width:30px; height:30px; border-radius:999px;
+    border:1px solid rgba(255,255,255,.14);
+    background:rgba(0,0,0,.55);
+    color:#fff; display:flex; align-items:center; justify-content:center;
+    cursor:pointer; font-size:14px; box-shadow:0 8px 18px rgba(0,0,0,.18);
+  }
+  .posterEditBtn:hover{transform:scale(1.04)}
 .footer{margin-top:16px; color:var(--muted); font-size:12px; line-height:1.6}
   @media (max-width: 560px){
     .wrap{padding:12px 12px 42px}
@@ -1371,6 +1380,7 @@
   <div class="topTabs">
     <button id="tabWatchlist" class="tabBtn active" onclick="setViewMode('watchlist')">Para assistir</button>
     <button id="tabWatched" class="tabBtn" onclick="setViewMode('watched')">Já assistidos</button>
+    <button id="tabRemoved" class="tabBtn" onclick="setViewMode('removed')">Removidos</button>
   </div>
 
   <div class="sortBar">
@@ -1560,7 +1570,7 @@
           </div>
           <div class="row2">
             <div class="field"><label>ID/Título da Wikipédia</label><input id="f_wiki"></div>
-            <div class="field"><label>Link do poster (opcional)</label><input id="f_poster"></div>
+            <div class="field"><label>Link do poster/capa (opcional)</label><input id="f_poster" placeholder="Cole aqui o link da capa se quiser trocar"></div>
           </div>
           <div class="inlineActions">
             <button class="secondaryAdd" onclick="recalculateFromForm()">Recalcular posição</button>
@@ -1782,11 +1792,13 @@ function openGptGenerator(e){
 
 function getVisibleMovies(){
   return movies.filter(m => {
-    const d = getData()[m.title] || {};
-    const watched = !!d.watched;
-    if(currentViewMode === "watchlist" && watched) return false;
-    if(currentViewMode === "watched" && !watched) return false;
-    return true;
+    const state = getMovieState(m);
+    const watched = !!state.watched;
+    const removed = !!state.removed;
+    if(currentViewMode === "watchlist") return !watched && !removed;
+    if(currentViewMode === "watched") return watched && !removed;
+    if(currentViewMode === "removed") return removed;
+    return !removed;
   });
 }
 
@@ -1861,7 +1873,8 @@ function sanitizeMovie(m){
     impact: Math.max(1, Math.min(5, Number(m.impact || 3))),
     quality: Math.max(1, Math.min(100, Number(m.quality || 75))),
     poster: m.poster || "",
-    createdAt: Number(m.createdAt || 0)
+    createdAt: Number(m.createdAt || 0),
+    id: m.id || ""
   };
 }
 function mergeMovies(){
@@ -2224,7 +2237,8 @@ async function readGptCode(){
   }
 }
 function openEditMovie(title){
-  const movie = movies.find(m => (m.title || "").toLowerCase() === String(title).toLowerCase());
+  const key = normalizeTitleKey(title);
+  const movie = movies.find(m => normalizeTitleKey(m.title) === key);
   if(!movie) return;
   document.getElementById("movieModalTitle").textContent = "Editar filme";
   document.getElementById("submitMovieBtn").textContent = "Salvar alterações";
@@ -2509,6 +2523,8 @@ function setViewMode(mode){
   currentViewMode = mode;
   document.getElementById("tabWatchlist").classList.toggle("active", mode === "watchlist");
   document.getElementById("tabWatched").classList.toggle("active", mode === "watched");
+  const removedTab = document.getElementById("tabRemoved");
+  if(removedTab) removedTab.classList.toggle("active", mode === "removed");
   applyFilter();
 }
 function toggleSmartFilters(){
@@ -2534,58 +2550,67 @@ function clearAllFilters(){
 function promptDeleteMovie(title){
   currentDeleteTitle = title;
   const text = document.getElementById("deleteConfirmText");
-  if(text) text.textContent = `Deseja remover "${title}" da lista?`;
-  ensureFloatingLayers();
-  document.getElementById("confirmDeleteModal").classList.add("open");
-  lockBody();
+  if(text) text.textContent = `Deseja mover "${title}" para a aba Removidos?`;
+  const modal = document.getElementById("confirmDeleteModal");
+  if(modal){
+    modal.classList.add("open");
+    lockBody();
+  }
 }
 function closeDeleteConfirm(){
   document.getElementById("confirmDeleteModal").classList.remove("open");
   unlockBody();
 }
-function confirmDeleteMovie(){
-  const title = currentDeleteTitle;
-  if(!title) return;
-
-  const key = normalizeTitleKey(title);
+function restoreMovie(title){
+  const movie = movies.find(item => normalizeTitleKey(item.title) === normalizeTitleKey(title));
+  if(!movie) return;
+  setMovieState(movie, { removed: false });
+  mergeMovies();
+  render(movies);
+  applyState();
+  setViewMode("watchlist");
+}
+function deleteForeverMovie(title){
+  const movie = movies.find(item => normalizeTitleKey(item.title) === normalizeTitleKey(title));
+  if(!movie) return;
 
   let custom = getCustomMovies();
-  custom = custom.filter(item => normalizeTitleKey(item.title) !== key);
+  custom = custom.filter(item => normalizeTitleKey(item.title) !== normalizeTitleKey(title));
   saveCustomMovies(custom);
 
   const overrides = getMovieOverrides();
   Object.keys(overrides).forEach(name => {
-    if(normalizeTitleKey(name) === key) delete overrides[name];
+    if(normalizeTitleKey(name) === normalizeTitleKey(title)) delete overrides[name];
   });
   saveMovieOverrides(overrides);
 
   const data = getData();
   Object.keys(data).forEach(name => {
-    if(normalizeTitleKey(name) === key) delete data[name];
+    if(name === movieKey(movie) || normalizeTitleKey(name) === normalizeTitleKey(title)) delete data[name];
   });
   saveData(data);
 
-  let hidden = JSON.parse(localStorage.getItem("denerHiddenTitles") || "[]");
-  hidden = hidden.filter(name => normalizeTitleKey(name) !== key);
-  localStorage.setItem("denerHiddenTitles", JSON.stringify(hidden));
-
   let removed = getRemovedTitles();
-  removed = removed.filter(name => normalizeTitleKey(name) !== key);
+  removed = removed.filter(name => normalizeTitleKey(name) !== normalizeTitleKey(title));
   removed.push(title);
   saveRemovedTitles(removed);
 
-  movies = movies.filter(item => normalizeTitleKey(item.title) !== key);
+  mergeMovies();
+  render(movies);
+  applyState();
+  applyFilter();
+  updateStats();
+}
+function confirmDeleteMovie(){
+  const title = currentDeleteTitle;
+  if(!title) return closeDeleteConfirm();
 
-  document.querySelectorAll(".card").forEach(card => {
-    const cardTitle = card.querySelector("h2")?.innerText || "";
-    if(normalizeTitleKey(cardTitle) === key){
-      card.remove();
-    }
-  });
+  const movie = movies.find(item => normalizeTitleKey(item.title) === normalizeTitleKey(title));
+  if(!movie) return closeDeleteConfirm();
 
+  setMovieState(movie, { removed: true, watched: false });
   currentDeleteTitle = "";
   closeDeleteConfirm();
-
   mergeMovies();
   render(movies);
   applyState();
@@ -2687,11 +2712,13 @@ function createCard(m) {
   const card = document.createElement("article");
   card.className = "card";
   card.dataset.search = [m.title, m.genre, (m.streaming||[]).join(" "), m.synopsis, m.rating, m.nudity, m.duration].join(" ").toLowerCase();
+  card.dataset.movieId = movieKey(m);
 
   card.innerHTML = `
     <div class="watchedOverlay" onclick="event.stopPropagation(); toggleWatchedFromOverlay(this)"><span>JÁ ASSISTIDO</span></div>
     <div class="cardTop" onclick="toggleCard(this.parentElement)">
       <div class="posterWrap">
+        <button class="posterEditBtn" onclick="event.stopPropagation(); openEditMovie(${JSON.stringify(m.title)})">✎</button>
         <img alt="Capa de ${m.title}" style="display:none">
         <div class="posterFallback">${m.title}</div>
       </div>
@@ -2721,8 +2748,10 @@ function createCard(m) {
             <button class="watchToggle" onclick="event.stopPropagation(); toggleWatched('${m.title}', this)">Já assisti</button>
             <a class="btn" href="${m.trailer}" target="_blank" rel="noopener">Ver trailer</a>
             <a class="btn secondary" href="${m.google}" target="_blank" rel="noopener">Abrir Google</a>
-            <button class="secondaryAdd" onclick="event.stopPropagation(); openEditMovie(${JSON.stringify(m.title)})">Editar cadastro</button>
-            <button class="deleteBtn" onclick="event.stopPropagation(); promptDeleteMovie(${JSON.stringify(m.title)})">Remover título</button>
+            <button class="secondaryAdd editBtnAction" onclick="event.stopPropagation(); openEditMovie(${JSON.stringify(m.title)})">Editar filme</button>
+            <button class="deleteBtn removeBtnAction" onclick="event.stopPropagation(); promptDeleteMovie(${JSON.stringify(m.title)})">Remover título</button>
+            <button class="secondaryAdd restoreBtnAction" style="display:none" onclick="event.stopPropagation(); restoreMovie(${JSON.stringify(m.title)})">Restaurar</button>
+            <button class="deleteBtn deleteForeverBtnAction" style="display:none" onclick="event.stopPropagation(); deleteForeverMovie(${JSON.stringify(m.title)})">Excluir definitivo</button>
           </div>
 
           <div class="panel" style="margin-top:12px">
@@ -2852,8 +2881,49 @@ function initTheme() {
   setTheme(saved);
 }
 
+function ensureMovieIds(){
+  const overrides = getMovieOverrides();
+  let changedOverrides = false;
+  Object.keys(overrides).forEach(k => {
+    if(!overrides[k].id){
+      overrides[k].id = `ovr_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+      changedOverrides = true;
+    }
+  });
+  if(changedOverrides) saveMovieOverrides(overrides);
+
+  let custom = getCustomMovies();
+  let changedCustom = false;
+  custom = custom.map((m, i) => {
+    if(!m.id){
+      changedCustom = true;
+      return { ...m, id: `cus_${Date.now()}_${i}_${Math.random().toString(36).slice(2,8)}` };
+    }
+    return m;
+  });
+  if(changedCustom) saveCustomMovies(custom);
+}
+function movieKey(movie){
+  return movie.id || normalizeTitleKey(movie.title);
+}
+function getMovieState(movie){
+  const data = getData();
+  return data[movieKey(movie)] || data[movie.title] || {};
+}
+function setMovieState(movie, patch){
+  const data = getData();
+  const key = movieKey(movie);
+  const current = data[key] || data[movie.title] || {};
+  data[key] = { ...current, ...patch };
+  if(movie.title && data[movie.title] && movie.title !== key) delete data[movie.title];
+  saveData(data);
+}
 function getData(){
-  return JSON.parse(localStorage.getItem("denerData")||"{}");
+  try{
+    return JSON.parse(localStorage.getItem("denerData")||"{}");
+  }catch(e){
+    return {};
+  }
 }
 function saveData(data){
   localStorage.setItem("denerData", JSON.stringify(data));
@@ -2913,11 +2983,11 @@ function confirmRatePrompt(){
   closeRatePrompt();
 }
 function toggleWatched(title, el){
-  const data = getData();
-  data[title] = data[title]||{};
-  const newValue = !data[title].watched;
-  data[title].watched = newValue;
-  saveData(data);
+  const movie = movies.find(item => normalizeTitleKey(item.title) === normalizeTitleKey(title));
+  if(!movie) return;
+  const state = getMovieState(movie);
+  const newValue = !state.watched;
+  setMovieState(movie, { watched: newValue, removed: false });
 
   const card = el ? el.closest(".card") : null;
   if(card) card.classList.remove("open");
@@ -2925,7 +2995,7 @@ function toggleWatched(title, el){
   applyState();
 
   if(newValue){
-    openRatePrompt(title);
+    openRatePrompt(movie.title);
   } else {
     closeRatePrompt();
   }
@@ -2934,24 +3004,38 @@ function toggleWatchedFromOverlay(overlayEl){
   const card = overlayEl.closest(".card");
   const title = card?.querySelector("h2")?.innerText?.trim();
   if(!title) return;
-  const data = getData();
-  data[title] = data[title] || {};
-  data[title].watched = false;
-  saveData(data);
+  const movie = movies.find(item => normalizeTitleKey(item.title) === normalizeTitleKey(title));
+  if(!movie) return;
+  setMovieState(movie, { watched: false });
   card.classList.remove("watched");
   card.classList.remove("open");
   applyState();
 }
 function applyState(){
-  const data = getData();
   document.querySelectorAll(".card").forEach(card=>{
     const title = card.querySelector("h2")?.innerText;
     if(!title) return;
-    const item = data[title] || {};
-    card.classList.toggle("watched", !!item.watched);
+    const movie = movies.find(item => normalizeTitleKey(item.title) === normalizeTitleKey(title));
+    if(!movie) return;
+    const item = getMovieState(movie);
+    const isRemoved = !!item.removed;
+    card.classList.toggle("watched", !!item.watched && !isRemoved);
 
     const watchBtn = card.querySelector(".watchToggle");
     if(watchBtn) watchBtn.textContent = item.watched ? "Desmarcar" : "Já assisti";
+    if(watchBtn) watchBtn.style.display = isRemoved ? "none" : "";
+
+    const removeBtn = card.querySelector(".removeBtnAction");
+    const editBtn = card.querySelector(".editBtnAction");
+    const posterEdit = card.querySelector(".posterEditBtn");
+    const restoreBtn = card.querySelector(".restoreBtnAction");
+    const deleteForeverBtn = card.querySelector(".deleteForeverBtnAction");
+
+    if(removeBtn) removeBtn.style.display = isRemoved ? "none" : "";
+    if(editBtn) editBtn.style.display = isRemoved ? "none" : "";
+    if(posterEdit) posterEdit.style.display = isRemoved ? "none" : "";
+    if(restoreBtn) restoreBtn.style.display = isRemoved ? "flex" : "none";
+    if(deleteForeverBtn) deleteForeverBtn.style.display = isRemoved ? "flex" : "none";
 
     const overlayLabel = card.querySelector(".watchedOverlay span");
     if(overlayLabel){
@@ -2960,7 +3044,7 @@ function applyState(){
       const width = Math.max(0, Math.min(100, r * 10));
       const thermo = r > 0 ? `<div class="overlayThermo"><div class="overlayThermoFill" style="width:${width}%"></div></div>` : "";
       const commentLine = comment ? `<div class="overlayComment">${comment}</div>` : "";
-      overlayLabel.innerHTML = item.watched
+      overlayLabel.innerHTML = item.watched && !isRemoved
         ? (`<div class="overlayTitle">JÁ ASSISTIDO</div>${thermo}${r > 0 ? `<div class="overlayNote">Sua nota: ${formatScore10(r)} / 10, toque para desmarcar</div>` : `<div class="overlayNote">Toque para desmarcar</div>`}${commentLine}`)
         : "JÁ ASSISTIDO";
     }
@@ -2969,7 +3053,7 @@ function applyState(){
     if(reviewBox){
       const r = Number(item.rating || 0);
       const comment = (item.quickComment || "").trim();
-      if(r > 0 || comment){
+      if((r > 0 || comment) && !isRemoved){
         reviewBox.style.display = "block";
         reviewBox.innerHTML = `<div class="reviewSummaryBox">
           <strong>Sua avaliação</strong>
@@ -3054,6 +3138,7 @@ function importData(input){
   reader.readAsText(file);
 }
 
+ensureMovieIds();
 mergeMovies();
 initTheme();
 render(movies); setTimeout(()=>{ ensureFloatingLayers(); applyState(); },200);
