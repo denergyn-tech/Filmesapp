@@ -1515,7 +1515,7 @@
           <div class="field"><label>Título</label><input id="f_title"></div>
           <div class="field"><label>Sinopse</label><textarea id="f_synopsis"></textarea></div>
           <div class="row2">
-            <div class="field"><label>Gênero</label><input id="f_genre" placeholder="Ex.: Suspense/Crime"></div>
+            <div class="field"><label>Gênero</label><input id="f_genre" list="genreOptions" placeholder="Ex.: Suspense/Crime"></div>
             <div class="field"><label>Duração</label><input id="f_duration" placeholder="Ex.: 2h 10m"></div>
           </div>
           <div class="row3">
@@ -1607,6 +1607,58 @@
     </div>
   </div>
 </div>
+
+
+<datalist id="genreOptions">
+  <option value="Ação"></option>
+  <option value="Aventura"></option>
+  <option value="Animação"></option>
+  <option value="Comédia"></option>
+  <option value="Comédia Romântica"></option>
+  <option value="Comédia Dramática"></option>
+  <option value="Drama"></option>
+  <option value="Drama/Romance"></option>
+  <option value="Drama/Crime"></option>
+  <option value="Drama/Biografia"></option>
+  <option value="Drama/História"></option>
+  <option value="Drama/Guerra"></option>
+  <option value="Suspense"></option>
+  <option value="Suspense/Crime"></option>
+  <option value="Suspense/Drama"></option>
+  <option value="Suspense Psicológico"></option>
+  <option value="Mistério"></option>
+  <option value="Mistério/Suspense"></option>
+  <option value="Crime"></option>
+  <option value="Crime/Policial"></option>
+  <option value="Policial"></option>
+  <option value="Thriller"></option>
+  <option value="Terror"></option>
+  <option value="Terror/Suspense"></option>
+  <option value="Terror Psicológico"></option>
+  <option value="Ficção Científica"></option>
+  <option value="Ficção Científica/Aventura"></option>
+  <option value="Fantasia"></option>
+  <option value="Fantasia/Aventura"></option>
+  <option value="Romance"></option>
+  <option value="Romance/Drama"></option>
+  <option value="Família"></option>
+  <option value="Família/Aventura"></option>
+  <option value="Infantil"></option>
+  <option value="Musical"></option>
+  <option value="Documentário"></option>
+  <option value="Biografia"></option>
+  <option value="História"></option>
+  <option value="Baseado em Fatos Reais"></option>
+  <option value="Esporte"></option>
+  <option value="Esporte/Drama"></option>
+  <option value="Guerra"></option>
+  <option value="Western"></option>
+  <option value="Noir"></option>
+  <option value="Super-herói"></option>
+  <option value="Épico"></option>
+  <option value="Cult"></option>
+  <option value="Outros"></option>
+</datalist>
 
 <div class="footer">
     Os botões de streaming abrem uma busca já focada no serviço e no filme, o que costuma funcionar melhor do que tentar usar um link fixo de catálogo, já que esses links mudam com frequência.
@@ -2481,12 +2533,11 @@ function clearAllFilters(){
 }
 function promptDeleteMovie(title){
   currentDeleteTitle = title;
-  const ok = window.confirm(`Deseja remover "${title}" da lista?`);
-  if(ok){
-    confirmDeleteMovie();
-  }else{
-    currentDeleteTitle = "";
-  }
+  const text = document.getElementById("deleteConfirmText");
+  if(text) text.textContent = `Deseja remover "${title}" da lista?`;
+  ensureFloatingLayers();
+  document.getElementById("confirmDeleteModal").classList.add("open");
+  lockBody();
 }
 function closeDeleteConfirm(){
   document.getElementById("confirmDeleteModal").classList.remove("open");
@@ -2533,6 +2584,7 @@ function confirmDeleteMovie(){
   });
 
   currentDeleteTitle = "";
+  closeDeleteConfirm();
 
   mergeMovies();
   render(movies);
